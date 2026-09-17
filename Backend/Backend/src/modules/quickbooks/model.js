@@ -63,6 +63,11 @@ module.exports = (sequelize) => {
         last_synced_at: {
             type: DataTypes.DATE,
             allowNull: true
+        },
+        record_count: {
+            type: DataTypes.INTEGER,
+            allowNull: true,
+            defaultValue: null
         }
     }, {
         tableName: 'quickbooks_quickbookstoken',

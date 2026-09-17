@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import {
   fetchMasterDataStream,
   fetchIncrementalDataStream,
+  apiFetch,
 } from "../../taskpane/api";
 import { ExcelService } from "../../taskpane/services/excelService";
 import { flattenAllMasterDataRecords } from "../../taskpane/services/excelDataMappers";
@@ -30,49 +31,56 @@ export function useMasterDataSync({
   const [logs, setLogs] = useState([]);
 
   // Verify real workbook status against Excel (prevents showing green on new or uninitialized workbooks)
-  useEffect(() => {
-    let mounted = true;
+  const syncWithWorkbook = useCallback(async () => {
+    const status = await ExcelService.checkWorkbookStatus();
 
-    async function syncWithWorkbook() {
-      const status = await ExcelService.checkWorkbookStatus();
-      if (!mounted) return;
-
-      if (status.isExcelAvailable) {
-        if (!status.hasSheets) {
-          // Sheets do NOT exist in the active workbook
-          setIsSetupDone(false);
-          setIsPullDone(false);
-          localStorage.removeItem(setupKey);
-          localStorage.removeItem(pullKey);
-          return;
-        }
-
-        // Sheets exist in active workbook
-        setIsSetupDone(true);
-        localStorage.setItem(setupKey, "complete");
-
-        if (!status.hasData) {
-          // No data rows pulled into 1.Master_Data yet
-          setIsPullDone(false);
-          localStorage.removeItem(pullKey);
-        } else {
-          // Both sheets and data exist
-          setIsPullDone(true);
-          localStorage.setItem(pullKey, "complete");
-        }
-      } else {
-        // Fallback if Excel API is not available (e.g. testing in browser)
-        setIsSetupDone(localStorage.getItem(setupKey) === "complete");
-        setIsPullDone(localStorage.getItem(pullKey) === "complete");
+    if (status.isExcelAvailable) {
+      if (!status.hasSheets) {
+        // Sheets do NOT exist in the active workbook
+        setIsSetupDone(false);
+        setIsPullDone(false);
+        localStorage.removeItem(setupKey);
+        localStorage.removeItem(pullKey);
+        return;
       }
+
+      // Sheets exist in active workbook
+      setIsSetupDone(true);
+      localStorage.setItem(setupKey, "complete");
+
+      if (!status.hasData) {
+        // No data rows pulled into 1.Master_Data yet
+        setIsPullDone(false);
+        localStorage.removeItem(pullKey);
+      } else {
+        // Both sheets and data exist
+        setIsPullDone(true);
+        localStorage.setItem(pullKey, "complete");
+      }
+    } else {
+      // Fallback if Excel API is not available (e.g. testing in browser)
+      setIsSetupDone(localStorage.getItem(setupKey) === "complete");
+      setIsPullDone(localStorage.getItem(pullKey) === "complete");
     }
+  }, [setupKey, pullKey]);
 
+  useEffect(() => {
+    setIsSetupDone(false);
+    setIsPullDone(false);
     syncWithWorkbook();
+  }, [companyId, syncWithWorkbook]);
 
-    return () => {
-      mounted = false;
+  useEffect(() => {
+    const handleSwitched = async () => {
+      setIsSetupDone(false);
+      setIsPullDone(false);
+      localStorage.removeItem(setupKey);
+      localStorage.removeItem(pullKey);
+      await syncWithWorkbook();
     };
-  }, [companyId, setupKey, pullKey]);
+    window.addEventListener("fa_company_switched", handleSwitched);
+    return () => window.removeEventListener("fa_company_switched", handleSwitched);
+  }, [setupKey, pullKey, syncWithWorkbook]);
 
   const addLog = useCallback((msg) => {
     const time = new Date().toLocaleTimeString();
@@ -129,7 +137,23 @@ export function useMasterDataSync({
     if (checkExpiredCompanyGuard()) return;
     if (setupBusy || pullBusy || spinning) return;
 
-    if (isSetupDone) {
+    // Verify live Excel workbook status before skipping setup
+    const status = await ExcelService.checkWorkbookStatus();
+    if (status.isExcelAvailable) {
+      if (status.hasSheets) {
+        setIsSetupDone(true);
+        localStorage.setItem(setupKey, "complete");
+        const msg = "Master and Input sheets already set up.";
+        const detail = `Workbook sheets are already configured for ${label}.`;
+        addLog(`${msg} ${detail}`);
+        notify(msg, "success", detail, provider, { persist: false });
+        return;
+      } else {
+        // Sheets do NOT exist in Excel — reset stale setup state so setup proceeds
+        setIsSetupDone(false);
+        localStorage.removeItem(setupKey);
+      }
+    } else if (isSetupDone) {
       const msg = "Master and Input sheets already set up.";
       const detail = `Workbook sheets are already configured for ${label}.`;
       addLog(`${msg} ${detail}`);
@@ -161,14 +185,25 @@ export function useMasterDataSync({
     if (checkExpiredCompanyGuard()) return;
     if (pullBusy || setupBusy || spinning) return;
 
-    if (!isSetupDone) {
+    // Verify live Excel workbook status before pulling
+    const status = await ExcelService.checkWorkbookStatus();
+    if (status.isExcelAvailable && !status.hasSheets) {
+      setIsSetupDone(false);
+      localStorage.removeItem(setupKey);
       const detailMsg = `Cannot pull master data: You must run Setup Master & Input Sheets for ${label} first.`;
       addLog(`Pull Master Data failed: ${detailMsg}`);
       notify("Pull Master Data Failed", "error", detailMsg, provider);
       return;
     }
 
-    if (isPullDone) {
+    if (!isSetupDone && (!status.isExcelAvailable || !status.hasSheets)) {
+      const detailMsg = `Cannot pull master data: You must run Setup Master & Input Sheets for ${label} first.`;
+      addLog(`Pull Master Data failed: ${detailMsg}`);
+      notify("Pull Master Data Failed", "error", detailMsg, provider);
+      return;
+    }
+
+    if (isPullDone && status.isExcelAvailable && status.hasData) {
       const msg = "Master data is already fetched.";
       const detail = "Use 'Refresh' to sync new updates.";
       addLog(`${msg} ${detail}`);
@@ -230,6 +265,20 @@ export function useMasterDataSync({
       const pullDetail = `Successfully fetched all ${count} records across all entities for this company.`;
       addLog(`${pullTitle} (${count} records pulled)`);
       notify(pullTitle, "success", pullDetail, provider);
+
+      // Persist record count to localStorage & backend so it shows in the company card
+      const targetId = companyId || activeId;
+      if (targetId && count >= 0) {
+        localStorage.setItem(`fa_records_${targetId}`, String(count));
+        window.dispatchEvent(new CustomEvent("fa_records_updated", {
+          detail: { companyId: targetId, count }
+        }));
+        const providerPath = provider === "xero" ? "xero" : "quickbooks";
+        apiFetch(`/api/${providerPath}/connections/${targetId}/record-count`, {
+          method: "PATCH",
+          body: JSON.stringify({ recordCount: count }),
+        }).catch(() => {}); // fire-and-forget, non-critical
+      }
     } catch (err) {
       console.error(err);
       addLog("Error pulling data: " + (err.message || err));

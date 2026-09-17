@@ -107,10 +107,10 @@ export function ConnectedDashboard({
       <div className="fa-header-row2">
         <button
           className="fa-disconnect-btn"
-          onClick={async () => {
-            if (companyConn.activeConnection) {
-              await companyConn.handleDisconnectCompany(companyConn.activeConnection);
-            }
+          onClick={() => {
+            // Soft/local disconnect only — does NOT mark the backend token as Disconnected.
+            // This keeps the backend token alive so that clicking "Connect" again
+            // skips OAuth and goes straight to ConnectedDashboard.
             disconnect();
           }}
         >
@@ -151,6 +151,9 @@ export function ConnectedDashboard({
           connectedCount={companyConn.connectedCount}
           onAddCompanyClick={companyConn.handleAddCompanyClick}
           onSwitchActiveCompany={companyConn.switchActiveCompany}
+          onCompanyClick={companyConn.handleCompanyClick}
+          companyRecordCounts={companyConn.companyRecordCounts}
+          isCountingRecords={companyConn.isCountingRecords}
           onReconnectCompany={(targetCompany) => {
             const target = targetCompany || companyConn.activeConnection;
             const reconnectId = target?.companyId || companyConn.realmId || null;

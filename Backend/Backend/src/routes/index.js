@@ -218,10 +218,54 @@ router.post('/connections/:id/activate', authenticate, async (req, res, next) =>
         if (!success && xeroRoutes) {
             const XeroService = require('../modules/xero/service');
             const xeroSuccess = await XeroService.activateConnection(companyId, userId);
-            if (xeroSuccess) success = true;
+            if (xeroSuccess) {
+                success = true;
+                try {
+                    const countInfo = await XeroService.getTotalRecordCountsForToken({ companyId, tenant_id: companyId });
+                    totalRecords = countInfo.total;
+                } catch (cErr) {}
+            }
         }
  
         return res.json({ success, totalRecords });
+    } catch (err) {
+        return next(err);
+    }
+});
+
+// GET /api/connections/:id/count
+router.get('/connections/:id/count', authenticate, async (req, res, next) => {
+    try {
+        const companyId = req.params.id;
+        let totalRecords = 0;
+        let details = null;
+        let success = false;
+
+        if (quickbooksRoutes) {
+            const QuickBooksService = require('../modules/quickbooks/service');
+            try {
+                const countInfo = await QuickBooksService.getTotalRecordCountsForToken({ companyId, realm_id: companyId });
+                if (countInfo && countInfo.total !== undefined) {
+                    totalRecords = countInfo.total;
+                    details = countInfo;
+                    success = true;
+                }
+            } catch (_) {}
+        }
+
+        if (!success && xeroRoutes) {
+            const XeroService = require('../modules/xero/service');
+            try {
+                const countInfo = await XeroService.getTotalRecordCountsForToken({ companyId, tenant_id: companyId });
+                if (countInfo && countInfo.total !== undefined) {
+                    totalRecords = countInfo.total;
+                    details = countInfo;
+                    success = true;
+                }
+            } catch (_) {}
+        }
+
+        return res.json({ success, companyId, totalRecords, details });
     } catch (err) {
         return next(err);
     }

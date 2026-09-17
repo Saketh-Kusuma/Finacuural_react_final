@@ -65,6 +65,11 @@ module.exports = (sequelize) => {
         type: DataTypes.DATE,
         allowNull: true
       },
+      record_count: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        defaultValue: null
+      },
     },
     {
       tableName: "xero_tokens",

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { apiFetch, openErp, isTrustedOrigin } from "../../taskpane/api";
+import { apiFetch, openErp, isTrustedOrigin, fetchCompanyRecordCount } from "../../taskpane/api";
 import { ExcelService } from "../../taskpane/services/excelService";
 
 export function formatRelativeTime(dateInput, status) {
@@ -42,6 +42,21 @@ export function useCompanyConnections({
   const [activeCompanyId, setActiveCompanyId] = useState(
     () => localStorage.getItem("fa_current_company_id") || null
   );
+
+  const [companyRecordCounts, setCompanyRecordCounts] = useState(() => {
+    const counts = {};
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith("fa_records_")) {
+        const id = key.replace("fa_records_", "");
+        const val = Number(localStorage.getItem(key));
+        if (!isNaN(val)) counts[id] = val;
+      }
+    }
+    return counts;
+  });
+
+  const [isCountingRecords, setIsCountingRecords] = useState(null);
 
   const platformConns = connections.filter(
     (c) => (c.platform || "").toLowerCase() === (provider || "").toLowerCase()
@@ -99,6 +114,35 @@ export function useCompanyConnections({
       mounted = false;
     };
   }, [user.email]);
+
+  // Sync record count updates from storage / events
+  useEffect(() => {
+    const handleRecordUpdate = (e) => {
+      const { companyId, count } = e.detail || {};
+      if (companyId && typeof count === "number") {
+        setCompanyRecordCounts((prev) => ({ ...prev, [companyId]: count }));
+      }
+    };
+    window.addEventListener("fa_records_updated", handleRecordUpdate);
+    return () => window.removeEventListener("fa_records_updated", handleRecordUpdate);
+  }, []);
+
+  useEffect(() => {
+    if (Array.isArray(connections) && connections.length > 0) {
+      setCompanyRecordCounts((prev) => {
+        let changed = false;
+        const next = { ...prev };
+        connections.forEach((c) => {
+          if (c.companyId && c.recordCount != null && next[c.companyId] === undefined) {
+            next[c.companyId] = c.recordCount;
+            localStorage.setItem(`fa_records_${c.companyId}`, String(c.recordCount));
+            changed = true;
+          }
+        });
+        return changed ? next : prev;
+      });
+    }
+  }, [connections]);
 
   const platformConnsRef = useRef(platformConns);
   useEffect(() => {
@@ -236,8 +280,6 @@ export function useCompanyConnections({
   const switchActiveCompany = async (companyId) => {
     if (switchingRef.current) return;
     switchingRef.current = true;
-    setActiveCompanyId(companyId);
-    localStorage.setItem("fa_current_company_id", companyId);
     try {
       await ExcelService.clearMasterData();
       localStorage.removeItem("fa_step_setup");
@@ -247,18 +289,44 @@ export function useCompanyConnections({
     } catch (err) {
       console.error("Error clearing Excel data: ", err);
     }
+    setActiveCompanyId(companyId);
+    localStorage.setItem("fa_current_company_id", companyId);
+    window.dispatchEvent(new CustomEvent("fa_company_switched", { detail: { companyId } }));
 
     const targetConn = platformConns.find((c) => c.companyId === companyId);
     try {
-      await apiFetch(`/api/connections/${companyId}/activate`, { method: "POST" });
+      const res = await apiFetch(`/api/connections/${companyId}/activate`, { method: "POST" });
+      const actData = await res.json().catch(() => ({}));
+      const totalRecords = typeof actData?.totalRecords === "number" ? actData.totalRecords : null;
+
+      if (totalRecords !== null) {
+        setCompanyRecordCounts((prev) => ({ ...prev, [companyId]: totalRecords }));
+        localStorage.setItem(`fa_records_${companyId}`, String(totalRecords));
+      }
+
       if (targetConn) {
-        if (addLog) addLog(`Switched active company to: ${targetConn.companyName}`);
-        notify(
-          `Active company updated to ${targetConn.companyName}`,
-          "success",
-          null,
-          provider
-        );
+        if (addLog) {
+          if (totalRecords !== null) {
+            addLog(`Data completed. (${totalRecords} records found for ${targetConn.companyName})`);
+          } else {
+            addLog(`Switched active company to: ${targetConn.companyName}`);
+          }
+        }
+        if (totalRecords !== null) {
+          notify(
+            "Data completed.",
+            "success",
+            `Successfully fetched all ${totalRecords} records across all entities for this company.`,
+            provider
+          );
+        } else {
+          notify(
+            `Active company updated to ${targetConn.companyName}`,
+            "success",
+            null,
+            provider
+          );
+        }
       }
       reloadConnections();
     } catch (err) {
@@ -266,6 +334,51 @@ export function useCompanyConnections({
       notify("Failed to switch active company.", "error", null, provider);
     } finally {
       switchingRef.current = false;
+    }
+  };
+
+  const handleCompanyClick = async (company) => {
+    if (!company) return;
+    const compId = company.companyId || company.tenant_id || realmId;
+    const compName = company.companyName || companyName || label;
+
+    if (company.status === "Disconnected") {
+      notify(
+        "Company Disconnected",
+        "error",
+        `"${compName}" is disconnected. Please click Reconnect to authorize access.`,
+        provider
+      );
+      return;
+    }
+
+    const isCurrentActive = compId === activeCompanyId;
+
+    if (!isCurrentActive) {
+      await switchActiveCompany(compId);
+      return;
+    }
+
+    try {
+      setIsCountingRecords(compId);
+      const totalRecords = await fetchCompanyRecordCount(compId);
+      setCompanyRecordCounts((prev) => ({ ...prev, [compId]: totalRecords }));
+      localStorage.setItem(`fa_records_${compId}`, String(totalRecords));
+
+      notify(
+        "Data completed.",
+        "success",
+        `Successfully fetched all ${totalRecords} records across all entities for this company.`,
+        provider
+      );
+      if (addLog) {
+        addLog(`Data completed. (${totalRecords} records found for ${compName})`);
+      }
+    } catch (err) {
+      console.error("Error fetching company record count:", err);
+      notify("Record count unavailable.", "error", "Could not fetch company records.", provider);
+    } finally {
+      setIsCountingRecords(null);
     }
   };
 
@@ -325,6 +438,9 @@ export function useCompanyConnections({
     reloadConnections,
     handleAddCompanyClick,
     switchActiveCompany,
+    handleCompanyClick,
+    companyRecordCounts,
+    isCountingRecords,
     handleDisconnectCompany,
     handleRenameCompany,
   };

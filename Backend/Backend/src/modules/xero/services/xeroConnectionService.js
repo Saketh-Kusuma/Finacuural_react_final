@@ -35,7 +35,8 @@ class XeroConnectionService {
             companyId:    t.tenant_id,
             status:       t.status || 'Not Synced',
             lastSyncedAt: t.last_synced_at || t.updatedAt || null,
-            createdAt:    t.createdAt || null
+            createdAt:    t.createdAt || null,
+            recordCount:  t.record_count != null ? t.record_count : null
         }));
     }
 
@@ -66,6 +67,16 @@ class XeroConnectionService {
         return updated > 0;
     }
 
+    static async updateRecordCount(companyId, userId, recordCount) {
+        if (!userId || !companyId) return false;
+        const { XeroToken } = XeroConnectionService._db();
+        const [updated] = await XeroToken.update(
+            { record_count: recordCount },
+            { where: { tenant_id: companyId, user_id: userId } }
+        );
+        return updated > 0;
+    }
+
     static async activateConnection(companyId, userId) {
         if (!userId) return false;
         const { XeroToken, Op } = XeroConnectionService._db();
@@ -88,6 +99,41 @@ class XeroConnectionService {
             { where: { tenant_id: companyId, user_id: userId } }
         );
         return updated > 0;
+    }
+
+    /**
+     * Pre-flight / count query to calculate total records across all entity types for a Xero token.
+     * Uses zero loops — pure functional execution via Promise.all, map, filter, and reduce.
+     */
+    static async getTotalRecordCountsForToken(token) {
+        const tenantId = token.companyId || token.tenant_id;
+        if (!tenantId) return { Customer: 0, Vendor: 0, Account: 0, Class: 0, Location: 0, total: 0 };
+
+        try {
+            const headers = await XeroApiClient._tenantHeaders(tenantId);
+            const [contactsRaw, accRes, classRes] = await Promise.all([
+                XeroApiClient.queryAllContacts(token).catch(() => ({ Contacts: [] })),
+                axios.get(CONSTANTS.XERO.ACCOUNTS_URL, { headers }).catch(() => null),
+                axios.get(CONSTANTS.XERO.TRACKING_CATEGORIES_URL, { headers }).catch(() => null)
+            ]);
+
+            const contacts = XeroMapper.toContactList(contactsRaw);
+            const accounts = accRes ? XeroMapper.toAccountList(accRes.data) : [];
+            const classes = classRes ? XeroMapper.toTrackingList(classRes.data, 'class') : [];
+            const locations = classRes ? XeroMapper.toTrackingList(classRes.data, 'location') : [];
+
+            const Customer = contacts.filter(c => c.isCustomer || !c.isSupplier).length;
+            const Vendor = contacts.filter(c => c.isSupplier).length;
+            const Account = accounts.length;
+            const Class = classes.length;
+            const Location = locations.length;
+            const total = Customer + Vendor + Account + Class + Location;
+
+            return { Customer, Vendor, Account, Class, Location, total };
+        } catch (err) {
+            logger.warn(`Could not fetch total record counts for Xero tenant ${tenantId}:`, err.message);
+            return { Customer: 0, Vendor: 0, Account: 0, Class: 0, Location: 0, total: 0 };
+        }
     }
 
     static async pullMasterData(companyId, tier, userId, isIncremental = false) {

@@ -16,7 +16,14 @@ export function CompanyListSection({
   onSwitchActiveCompany,
   onReconnectCompany,
   onOpenContextMenu,
+  companyRecordCounts = {},
+  onCompanyClick,
+  isCountingRecords,
 }) {
+  const singleCompId = activeConnection?.companyId || realmId;
+  const singleRecordCount = companyRecordCounts?.[singleCompId] ?? activeConnection?.recordCount;
+  const isSingleCounting = isCountingRecords === singleCompId || (isCountingRecords === true);
+
   return (
     <>
       <div className="fa-section-header">
@@ -34,7 +41,15 @@ export function CompanyListSection({
 
       <div className="fa-company-list">
         {platformConns.length === 0 ? (
-          <div className="fa-company-item active-company">
+          <div
+            className="fa-company-item active-company"
+            style={{ cursor: activeConnection?.status === "Disconnected" ? "default" : "pointer" }}
+            onClick={() => {
+              if (onCompanyClick) {
+                onCompanyClick(activeConnection || { companyId: realmId, companyName, platform: provider });
+              }
+            }}
+          >
             <input
               type="radio"
               name="companyRadio"
@@ -49,7 +64,14 @@ export function CompanyListSection({
             </div>
             <div className="fa-company-info">
               <div className="fa-company-name">{companyName}</div>
-              <div className="fa-company-tag">Last Sync: {lastSyncText}</div>
+              <div className="fa-company-tag">
+                Last Sync: {lastSyncText}
+                {isSingleCounting ? (
+                  <span style={{ color: "#2563eb", fontStyle: "italic" }}> • Fetching records...</span>
+                ) : singleRecordCount != null && activeConnection?.status !== "Disconnected" ? (
+                  <span> • {Number(singleRecordCount).toLocaleString()} records</span>
+                ) : null}
+              </div>
             </div>
             <div className="fa-company-actions">
               {activeConnection?.status === "Disconnected" ? (
@@ -91,6 +113,9 @@ export function CompanyListSection({
             const cIsXero = (c.platform || "").toLowerCase() === "xero";
             const cDisplayName = c.companyName || (cIsXero ? "Xero Organisation" : "QuickBooks Company");
             const cLastSync = formatRelativeTime(c.lastSyncedAt, c.status);
+            const compId = c.companyId;
+            const recordCount = companyRecordCounts?.[compId] ?? c.recordCount;
+            const isCountingThis = isCountingRecords === compId || (isCountingRecords === true && isActive);
 
             return (
               <div
@@ -98,7 +123,9 @@ export function CompanyListSection({
                 className={`fa-company-item ${isActive && !isDisconnected ? "active-company" : ""} ${isDisconnected ? "disconnected-company" : ""}`}
                 style={{ cursor: isDisconnected ? "default" : "pointer" }}
                 onClick={() => {
-                  if (!isDisconnected && !isActive) {
+                  if (onCompanyClick) {
+                    onCompanyClick(c);
+                  } else if (!isDisconnected && !isActive) {
                     onSwitchActiveCompany(c.companyId);
                   }
                 }}
@@ -109,7 +136,11 @@ export function CompanyListSection({
                   className="fa-company-radio"
                   checked={isActive && !isDisconnected}
                   onChange={() => {
-                    if (!isDisconnected) onSwitchActiveCompany(c.companyId);
+                    if (onCompanyClick) {
+                      onCompanyClick(c);
+                    } else if (!isDisconnected) {
+                      onSwitchActiveCompany(c.companyId);
+                    }
                   }}
                 />
                 <div
@@ -124,7 +155,14 @@ export function CompanyListSection({
                       <span style={{ color: "#ef4444", fontSize: 10, marginLeft: 4 }}>(Disconnected)</span>
                     )}
                   </div>
-                  <div className="fa-company-tag">Last Sync: {cLastSync}</div>
+                  <div className="fa-company-tag">
+                    Last Sync: {cLastSync}
+                    {isCountingThis ? (
+                      <span style={{ color: "#2563eb", fontStyle: "italic" }}> • Fetching records...</span>
+                    ) : recordCount != null && !isDisconnected ? (
+                      <span> • {Number(recordCount).toLocaleString()} records</span>
+                    ) : null}
+                  </div>
                 </div>
                 <div className="fa-company-actions">
                   {isActive && !isDisconnected ? (
@@ -144,7 +182,11 @@ export function CompanyListSection({
                       className="fa-btn-switch"
                       onClick={(e) => {
                         e.stopPropagation();
-                        onSwitchActiveCompany(c.companyId);
+                        if (onCompanyClick) {
+                          onCompanyClick(c);
+                        } else {
+                          onSwitchActiveCompany(c.companyId);
+                        }
                       }}
                     >
                       Switch

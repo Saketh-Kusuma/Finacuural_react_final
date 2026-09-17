@@ -321,7 +321,39 @@ class XeroController {
         const companyId = req.params.id;
         const userId = req.user.userId || req.user.id;
         const success = await XeroService.activateConnection(companyId, userId);
-        return res.json({ success: !!success });
+
+        let totalRecords = 0;
+        if (success) {
+            try {
+                const countInfo = await XeroService.getTotalRecordCountsForToken({ companyId, tenant_id: companyId });
+                totalRecords = countInfo.total;
+            } catch (err) {}
+        }
+
+        return res.json({ success: !!success, totalRecords });
+    });
+
+    /**
+     * GET /api/xero/connections/:id/count
+     */
+    getConnectionRecordCount = asyncHandler(async (req, res, next) => {
+        const companyId = req.params.id;
+        try {
+            const countInfo = await XeroService.getTotalRecordCountsForToken({ companyId, tenant_id: companyId });
+            return res.json({
+                success: true,
+                companyId,
+                totalRecords: countInfo.total,
+                details: countInfo
+            });
+        } catch (err) {
+            return res.json({
+                success: false,
+                companyId,
+                totalRecords: 0,
+                error: err.message
+            });
+        }
     });
 
     /**
@@ -336,6 +368,20 @@ class XeroController {
         }
 
         const success = await XeroService.renameConnection(companyId, userId, companyName);
+        return res.json({ success: !!success });
+    });
+
+    /**
+     * PATCH /api/xero/connections/:id/record-count
+     */
+    updateRecordCount = asyncHandler(async (req, res, next) => {
+        const companyId = req.params.id;
+        const userId = req.user.userId || req.user.id;
+        const { recordCount } = req.body;
+        if (recordCount == null || isNaN(Number(recordCount))) {
+            throw new ValidationError('recordCount must be a number.');
+        }
+        const success = await XeroService.updateRecordCount(companyId, userId, Number(recordCount));
         return res.json({ success: !!success });
     });
 

@@ -197,8 +197,43 @@ export function Dashboard({
     return () => window.removeEventListener("message", receive);
   }, []);
 
-  const connect = (next) => {
+  const connect = async (next) => {
     sessionStorage.removeItem("fa_erp_user_disconnected");
+    // Before opening OAuth, check if the backend still has an active connection
+    // for this provider. If yes, restore it and skip OAuth entirely.
+    const email = user?.email || localStorage.getItem("fa_user_email") || "";
+    if (email) {
+      try {
+        const res = await apiFetch(`/api/connections?mail=${encodeURIComponent(email)}`);
+        const conns = await res.json();
+        if (Array.isArray(conns) && conns.length > 0) {
+          const providerMatch = conns.find(
+            (c) =>
+              c.status !== "Disconnected" &&
+              (next === "xero"
+                ? (c.platform || "").toLowerCase().includes("xero")
+                : !(c.platform || "").toLowerCase().includes("xero"))
+          );
+          if (providerMatch) {
+            // Active token still exists on backend — restore and go to ConnectedDashboard
+            const detectedProvider = (providerMatch.platform || "").toLowerCase().includes("xero")
+              ? "xero"
+              : "quickbooks";
+            localStorage.setItem("fa_erp_connected", "true");
+            localStorage.setItem("fa_erp_type", detectedProvider);
+            if (providerMatch.companyId) {
+              localStorage.setItem("fa_current_company_id", providerMatch.companyId);
+            }
+            setProvider(detectedProvider);
+            setConnected(true);
+            return;
+          }
+        }
+      } catch (_) {
+        // If the check fails, fall through to OAuth
+      }
+    }
+    // No active connection found — proceed with OAuth
     setProvider(next);
     onConnect(next);
   };

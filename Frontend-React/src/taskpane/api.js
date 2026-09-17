@@ -320,4 +320,30 @@ export async function fetchIncrementalDataStream(provider, companyId, tier, onPr
   }
 }
 
+export async function fetchCompanyRecordCount(companyId) {
+  if (!companyId) return 0;
+  try {
+    const res = await apiFetch(`/api/connections/${companyId}/count`);
+    const data = await res.json();
+    if (data && typeof data.totalRecords === "number") {
+      return data.totalRecords;
+    }
+  } catch (err) {
+    console.warn("GET /count failed, attempting /activate fallback:", err);
+  }
+
+  // Fallback: POST /api/connections/:id/activate
+  try {
+    const res = await apiFetch(`/api/connections/${companyId}/activate`, { method: "POST" });
+    const data = await res.json();
+    if (data && typeof data.totalRecords === "number") {
+      return data.totalRecords;
+    }
+  } catch (err) {
+    console.warn("Fallback /activate count failed:", err);
+  }
+
+  return 0;
+}
+
 

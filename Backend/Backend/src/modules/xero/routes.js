@@ -33,7 +33,9 @@ router.get('/connections', authenticate, controller.listConnections);
 router.get('/connections/stats', authenticate, validate(schemas.connectionStatsQuery, 'query'), controller.getConnectionStats);
 router.delete('/connections/:id', authenticate, controller.disconnectConnection);
 router.post('/connections/:id/activate', authenticate, controller.activateConnection);
+router.get('/connections/:id/count', authenticate, controller.getConnectionRecordCount);
 router.patch('/connections/:id/rename', authenticate, validate(schemas.renameConnection), controller.renameConnection);
+router.patch('/connections/:id/record-count', authenticate, controller.updateRecordCount);
 router.get('/pull-master-data', authenticate, validate(schemas.moduleMasterDataQuery, 'query'), controller.pullMasterData);
 router.get('/refresh-incremental', authenticate, validate(schemas.moduleMasterDataQuery, 'query'), controller.refreshIncremental);
 

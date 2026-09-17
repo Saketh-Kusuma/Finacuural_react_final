@@ -92,7 +92,8 @@ class QuickBooksConnectionService {
             companyId:    t.realm_id,
             status:       t.status || 'Not Synced',
             lastSyncedAt: t.last_synced_at || t.updated_at || null,
-            createdAt:    t.created_at || null
+            createdAt:    t.created_at || null,
+            recordCount:  t.record_count != null ? t.record_count : null
         }));
     }
 
@@ -118,6 +119,16 @@ class QuickBooksConnectionService {
         const { QuickBooksToken } = QuickBooksConnectionService._db();
         const [updated] = await QuickBooksToken.update(
             { status: 'Disconnected' },
+            { where: { realm_id: companyId, user_id: userId } }
+        );
+        return updated > 0;
+    }
+
+    static async updateRecordCount(companyId, userId, recordCount) {
+        if (!userId || !companyId) return false;
+        const { QuickBooksToken } = QuickBooksConnectionService._db();
+        const [updated] = await QuickBooksToken.update(
+            { record_count: recordCount },
             { where: { realm_id: companyId, user_id: userId } }
         );
         return updated > 0;

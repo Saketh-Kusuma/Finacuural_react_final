@@ -350,6 +350,30 @@ class QuickbooksController {
     });
 
     /**
+     * GET /api/quickbooks/connections/:id/count
+     */
+    getConnectionRecordCount = asyncHandler(async (req, res, next) => {
+        const companyId = req.params.id;
+        try {
+            const token = { companyId, realm_id: companyId };
+            const countInfo = await QuickBooksService.getTotalRecordCountsForToken(token);
+            return res.json({
+                success: true,
+                companyId,
+                totalRecords: countInfo.total,
+                details: countInfo
+            });
+        } catch (err) {
+            return res.json({
+                success: false,
+                companyId,
+                totalRecords: 0,
+                error: err.message
+            });
+        }
+    });
+
+    /**
      * PATCH /api/quickbooks/connections/:id/rename
      */
     renameConnection = asyncHandler(async (req, res, next) => {
@@ -361,6 +385,20 @@ class QuickbooksController {
         }
 
         const success = await QuickBooksService.renameConnection(companyId, userId, companyName);
+        return res.json({ success: !!success });
+    });
+
+    /**
+     * PATCH /api/quickbooks/connections/:id/record-count
+     */
+    updateRecordCount = asyncHandler(async (req, res, next) => {
+        const companyId = req.params.id;
+        const userId = req.user.userId || req.user.id;
+        const { recordCount } = req.body;
+        if (recordCount == null || isNaN(Number(recordCount))) {
+            throw new ValidationError('recordCount must be a number.');
+        }
+        const success = await QuickBooksService.updateRecordCount(companyId, userId, Number(recordCount));
         return res.json({ success: !!success });
     });
 

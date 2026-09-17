@@ -48,6 +48,10 @@ class QuickBooksService {
         return QuickBooksConnectionService.disconnectConnection(companyId, userId);
     }
 
+    static async updateRecordCount(companyId, userId, recordCount) {
+        return QuickBooksConnectionService.updateRecordCount(companyId, userId, recordCount);
+    }
+
     static async activateConnection(companyId, userId) {
         return QuickBooksConnectionService.activateConnection(companyId, userId);
     }

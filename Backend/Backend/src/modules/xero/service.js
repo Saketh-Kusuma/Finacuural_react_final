@@ -97,12 +97,20 @@ class XeroService {
         return XeroConnectionService.disconnectConnection(companyId, userId);
     }
 
+    static async updateRecordCount(companyId, userId, recordCount) {
+        return XeroConnectionService.updateRecordCount(companyId, userId, recordCount);
+    }
+
     static async activateConnection(companyId, userId) {
         return XeroConnectionService.activateConnection(companyId, userId);
     }
 
     static async renameConnection(companyId, userId, companyName) {
         return XeroConnectionService.renameConnection(companyId, userId, companyName);
+    }
+
+    static async getTotalRecordCountsForToken(token) {
+        return XeroConnectionService.getTotalRecordCountsForToken(token);
     }
 
     static async pullMasterData(companyId, tier, userId, isIncremental = false) {
